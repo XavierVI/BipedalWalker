@@ -387,3 +387,20 @@ class ReinforceAgent:
                     f"Episode {ep+1}/{self.episodes} | Reward {total:.1f} | Avg {np.mean(rewards_all[-20:]):.1f} | ε={self.epsilon:.3f}", flush=True)
 
         return rewards_all
+
+
+class PPOAgent:
+    def __init__(self, cfg):
+        pass
+
+    
+    def select_action(self, state):
+        pass
+
+
+    def update(self, trajectories):
+        pass
+    
+    def train(self):
+        pass
+

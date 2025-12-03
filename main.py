@@ -15,7 +15,7 @@ from agents import *
 def save_rewards_to_csv(rewards, lr, gamma, use_boltzmann):
     # save rewards data to a CSV file using numpy
     os.makedirs("results", exist_ok=True)
-    filename = f"results/sarsa_lr-{lr}_gamma-{gamma}_boltzmann-{use_boltzmann}.csv"
+    filename = f"results/lr-{lr}_gamma-{gamma}_boltzmann-{use_boltzmann}.csv"
     exists = os.path.exists(filename)
     
     # Create array with episodes and rewards
@@ -46,7 +46,7 @@ def run_training(lr, gamma, use_boltzmann, cfg):
     for trial in range(trials):
         np.random.seed(base_seed + trial)
         torch.manual_seed(base_seed + trial)
-        trainer = SarsaAgent(cfg)
+        trainer = ReinforceAgent(cfg)
         rewards = trainer.train()
         save_rewards_to_csv(rewards, lr, gamma, use_boltzmann)
     
