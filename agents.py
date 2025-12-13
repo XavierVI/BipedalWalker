@@ -450,9 +450,43 @@ class A2CAgent(BaseAgent):
             self.actor = PolicyNet(cfg)
         
         self.critic = ValueNet(cfg)
+        self.actor_opt = optim.Adam(self.actor.parameters(), lr=cfg["learning_rate"])
+        self.critic_opt = optim.Adam(self.critic.parameters(), lr=cfg["learning_rate"])
+        self.lambda_ = cfg["lambda"]
+        self.N = cfg["n_steps"]
     
     def _get_agent_prefix(self):
         return "a2c"
+
+    def n_step_advantage(self, states):
+        """N-step advantage calculation."""
+        # max time step = N + 1
+        max_time_step = len(states)
+
+        return self.gamma**(max_time_step) * \
+            self.critic(states[-1]) - self.critic(states)
+
+    def gae(self, states, rewards):
+        """
+        Generalized Advantage Estimation (GAE).
+        
+        One advantage needs to be computed for each state.
+
+        Args:
+            states (list of torch.Tensor): tensor of N states.
+        """
+        # max time step = N + 1
+        max_time_step = len(states)
+        gaes = torch.zeros_like(states)
+
+        for t in range(max_time_step):
+            for l in range(max_time_step):
+                coeff = (self.gamma * self.lambda_)**l
+                delta = rewards[t + l] + self.gamma * self.critic(states[t + l + 1]) \
+                    - self.critic(states[t + l])
+                gaes[t] += coeff * delta
+
+        return gaes
     
     def select_action(self, state: np.array):
         """Action selection from the actor."""
@@ -521,16 +555,15 @@ class A2CAgent(BaseAgent):
             dtype=torch.float32
         ).to(self.device)
 
-        if self.use_baseline:
-            states_t = torch.FloatTensor(states).to(self.device)
-            baselines = self.baseline(states_t).squeeze()
-            advantages = returns - baselines.detach()
-            base_loss = F.mse_loss(baselines, returns)
-            self.baseline_opt.zero_grad()
-            base_loss.backward()
-            self.baseline_opt.step()
-        else:
-            advantages = returns
+        # compute A(s, a)
+        states_t = torch.FloatTensor(states).to(self.device)
+        Vs = self.critic(states_t)
+        advantages = returns - baselines.detach()
+        base_loss = F.mse_loss(baselines, returns)
+        self.baseline_opt.zero_grad()
+        base_loss.backward()
+        self.baseline_opt.step()
+
 
         # maximize expected return = minimize -expected return
         loss = - \
