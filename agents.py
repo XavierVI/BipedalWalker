@@ -9,7 +9,7 @@ from abc import ABC, abstractmethod
 # --------------------------------------------------------------- #
 #                     Policy Class Definitions                    #
 # --------------------------------------------------------------- #
-class SarsaQNet(nn.Module):
+class ValueNet(nn.Module):
     def __init__(self, s_dim, a_dim, hidden, act):
         super().__init__()
 
@@ -187,7 +187,7 @@ class SarsaAgent(BaseAgent):
         super().__init__(cfg)
         
         # Policy network, optimizer, and loss function
-        self.q_net = SarsaQNet(
+        self.q_net = ValueNet(
             self.state_dim, self.action_dim,
             cfg["hidden_layers"], cfg["activation_function"]).to(self.device)
         self.opt = optim.Adam(self.q_net.parameters(), lr=cfg["learning_rate"])
@@ -419,6 +419,144 @@ class ReinforceAgent(BaseAgent):
                 
                 next_state, reward, done, trunc, _ = env.step(action)
                 
+                rewards.append(reward)
+                states.append(state)
+                total += reward
+                state = next_state
+
+                if (ep + 1) % self.render_int == 0 and self.display:
+                    env.render()
+
+                if done or trunc:
+                    break
+
+            # convert to numpy array for better performance
+            states = np.array(states)
+            self.update(log_probs, rewards, states)
+            self.decay_epsilon()
+            rewards_all.append(total)
+            self.print_progress(ep, total, rewards_all)
+
+        return rewards_all
+
+
+class A2CAgent(BaseAgent):
+    def __init__(self, cfg):
+        super().__init__(cfg)
+        
+        if self.action_space_type == "continuous":
+            self.policy = ContinuousPolicyNet(cfg)
+        else:
+            self.actor = PolicyNet(cfg)
+        
+        self.critic = ValueNet(cfg)
+    
+    def _get_agent_prefix(self):
+        return "a2c"
+    
+    def select_action(self, state: np.array):
+        """Action selection from the actor."""
+        state_t = torch.FloatTensor(state).unsqueeze(0).to(self.device)
+
+        if self.action_space_type == "continuous":
+            # Continuous action space using Gaussian policy
+            mean, log_std = self.actor(state_t)
+            mean = mean.squeeze()
+            log_std = log_std.squeeze()
+            std = torch.exp(log_std)
+
+            # Add temperature/exploration scaling
+            if self.use_boltzmann:
+                std = std * self.tau
+
+            # Sample action from Gaussian distribution
+            dist = torch.distributions.Normal(mean, std)
+            action_t = dist.sample()
+            action_t = torch.clamp(action_t, -1, 1)
+
+            # Compute log probability by summing over action dimensions
+            log_prob = dist.log_prob(action_t).sum()
+
+            return action_t.cpu().numpy(), log_prob
+
+        else:  # Discrete action space
+            logits_t, probs_t = self.actor(state_t)
+            logits_t = logits_t.squeeze()
+            probs_t = probs_t.squeeze()
+
+            if self.use_boltzmann:
+                # Numerically stable softmax with temperature
+                scaled_logits = logits_t / self.tau
+                boltz_probs = torch.softmax(scaled_logits, dim=-1)
+                action = torch.multinomial(boltz_probs, 1).item()
+                log_prob = torch.log(torch.clamp(
+                    boltz_probs[action], min=1e-8))
+
+                return action, log_prob
+
+            else:
+                # Epsilon-greedy
+                if np.random.rand() < self.epsilon:
+                    action = np.random.randint(self.action_dim)
+                else:
+                    # create a categorical distribution over the actions
+                    dist = torch.distributions.Categorical(probs=probs_t)
+                    # sample an action from the distribution
+                    action = dist.sample()
+                    action = action.item()
+
+            log_prob = torch.log(torch.clamp(probs_t[action], min=1e-8))
+            return action, log_prob
+
+
+    def update(self, log_probs, rewards, states: np.array):
+        R, returns = 0, []
+
+        for r in reversed(rewards):
+            R = r + self.gamma * R
+            returns.insert(0, R)
+
+        returns = torch.tensor(
+            np.array(returns),
+            dtype=torch.float32
+        ).to(self.device)
+
+        if self.use_baseline:
+            states_t = torch.FloatTensor(states).to(self.device)
+            baselines = self.baseline(states_t).squeeze()
+            advantages = returns - baselines.detach()
+            base_loss = F.mse_loss(baselines, returns)
+            self.baseline_opt.zero_grad()
+            base_loss.backward()
+            self.baseline_opt.step()
+        else:
+            advantages = returns
+
+        # maximize expected return = minimize -expected return
+        loss = - \
+            torch.sum(torch.stack(
+                [lp * adv for lp, adv in zip(log_probs, advantages)]))
+        self.opt.zero_grad()
+        loss.backward()
+        self.opt.step()
+
+    def train(self):
+        print(
+            f"Starting training with parameters gamma={self.gamma}, use_boltzmann={self.use_boltzmann}...")
+        rewards_all = []
+
+        for ep in range(self.num_episodes):
+            env = self.get_env(ep)
+            state, _ = env.reset()
+            log_probs, rewards, states = [], [], []
+            total = 0
+
+            for t in range(self.max_steps):
+                action, log_prob = self.select_action(state)
+                log_probs.append(log_prob)
+
+                next_state, reward, done, trunc, _ = env.step(action)
+
                 rewards.append(reward)
                 states.append(state)
                 total += reward
