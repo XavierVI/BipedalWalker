@@ -448,46 +448,29 @@ class A2CAgent(BaseAgent):
             self.policy = ContinuousPolicyNet(cfg)
         else:
             self.actor = PolicyNet(cfg)
-        
         self.critic = ValueNet(cfg)
+
+        # Optimizers
         self.actor_opt = optim.Adam(self.actor.parameters(), lr=cfg["learning_rate"])
         self.critic_opt = optim.Adam(self.critic.parameters(), lr=cfg["learning_rate"])
+        
+        # Criterion
+        self.criterion = nn.MSELoss()
+        
+        # Hyperparameters
+        self.use_gae = cfg["use_gae"]
         self.lambda_ = cfg["lambda"]
         self.N = cfg["n_steps"]
+
+        if self.use_gae:
+            self.approx_func = self._gae
+        else:
+            self.approx_func = self._N_step_return
     
     def _get_agent_prefix(self):
         return "a2c"
 
-    def n_step_advantage(self, states):
-        """N-step advantage calculation."""
-        # max time step = N + 1
-        max_time_step = len(states)
 
-        return self.gamma**(max_time_step) * \
-            self.critic(states[-1]) - self.critic(states)
-
-    def gae(self, states, rewards):
-        """
-        Generalized Advantage Estimation (GAE).
-        
-        One advantage needs to be computed for each state.
-
-        Args:
-            states (list of torch.Tensor): tensor of N states.
-        """
-        # max time step = N + 1
-        max_time_step = len(states)
-        gaes = torch.zeros_like(states)
-
-        for t in range(max_time_step):
-            for l in range(max_time_step):
-                coeff = (self.gamma * self.lambda_)**l
-                delta = rewards[t + l] + self.gamma * self.critic(states[t + l + 1]) \
-                    - self.critic(states[t + l])
-                gaes[t] += coeff * delta
-
-        return gaes
-    
     def select_action(self, state: np.array):
         """Action selection from the actor."""
         state_t = torch.FloatTensor(state).unsqueeze(0).to(self.device)
@@ -543,35 +526,107 @@ class A2CAgent(BaseAgent):
             return action, log_prob
 
 
-    def update(self, log_probs, rewards, states: np.array):
-        R, returns = 0, []
+    def _N_step_return(self, rewards_t, dones_t, Vs, N):
+        """
+        Computes the advantages and target values using the
+        N-step approximation for Q(s, a).
 
-        for r in reversed(rewards):
-            R = r + self.gamma * R
-            returns.insert(0, R)
+        All computations are done with no_grad() to avoid unnecessary gradient computation.
 
-        returns = torch.tensor(
-            np.array(returns),
-            dtype=torch.float32
-        ).to(self.device)
+        Args:
+            rewards_t (torch.Tensor): list of rewards for each state-action pair.
+            dones_t (torch.Tensor): list of done flags for each state-action pair.
+            Vs (torch.Tensor): list of state values for each state.
+            N (int): number of steps in the trajectory.
+        Returns:
+            advantages (torch.Tensor): list of advantages for each state-action pair.
+            targets (torch.Tensor): list of target values for each state-action pair.
+        """
+        with torch.no_grad():
+            rets = torch.zeros(N, device=self.device)
+            future_ret = Vs[-1] * (1 - dones_t[-1])
 
-        # compute A(s, a)
+            for t in reversed(range(N)):
+                rets[t] = rewards_t[t] + self.gamma * \
+                    future_ret * (1 - dones_t[t])
+                future_ret = rets[t]
+
+            # Compute advantages: A(s,a) = Q(s,a) - V(s) ≈ Return - V(s)
+            advantages = rets - Vs
+            # set target values
+            targets = rets
+
+            return advantages, targets
+
+    def _gae(self, rewards_t, dones_t, Vs, N):
+        """
+        This function computes the advantages and target values using the
+        Generalized Advantage Estimation (GAE).
+
+        All computations are done with no_grad() to avoid unnecessary gradient computation.
+        
+        Args:
+            rewards_t (torch.Tensor): list of rewards for each state-action pair.
+            dones_t (torch.Tensor): list of done flags for each state-action pair.
+            Vs (torch.Tensor): list of state values for each state.
+            N (int): number of steps in the trajectory.
+        Returns:
+            advantages (torch.Tensor): list of advantages for each state-action pair.
+            targets (torch.Tensor): list of target values for each state-action pair.
+        """
+        with torch.no_grad():
+            advantages = torch.zeros(N, device=self.device)
+            gae = 0.0
+
+            for t in reversed(range(N)):
+                # TD error: δ_t = r_t + γ*V(s_{t+1}) - V(s_t)
+                delta = rewards_t[t] + self.gamma * \
+                    Vs[t + 1] * (1 - dones_t[t]) - Vs[t]
+
+                # GAE: A_t = δ_t + (γλ)*δ_{t+1} + (γλ)^2*δ_{t+2} + ...
+                gae = delta + self.gamma * \
+                    self.lambda_ * (1 - dones_t[t]) * gae
+                advantages[t] = gae
+
+            # Target is V(s) + A(s,a)
+            targets = Vs[:-1] + advantages
+            return advantages, targets
+
+    def update(self, log_probs, rewards, states, dones):
+        """
+        Update both the actor and the critic networks.
+
+        Args:
+            log_probs (list of torch.Tensor): list of log probabilities for each action.
+            rewards (list of float): list of rewards for each state-action pair.
+            states (list of np.array): list of states for each state-action pair.
+            dones (list of bool): list of done flags for each state-action pair.
+        """
+        N = len(rewards)
         states_t = torch.FloatTensor(states).to(self.device)
-        Vs = self.critic(states_t)
-        advantages = returns - baselines.detach()
-        base_loss = F.mse_loss(baselines, returns)
-        self.baseline_opt.zero_grad()
-        base_loss.backward()
-        self.baseline_opt.step()
+        rewards_t = torch.FloatTensor(rewards).to(self.device)
+        dones_t = torch.FloatTensor(dones).to(self.device)
+        
+        # Compute all state values at once
+        Vs = self.critic(states_t).squeeze()
 
+        # Compute advantages and targets
+        # pass Vs without gradient information
+        advantages, targets = self.approx_func(
+            rewards_t, dones_t, Vs, N
+        )
+        
+        # Update critic to minimize TD error        
+        critic_loss = self.criterion(Vs, targets)
+        self.critic_opt.zero_grad()
+        critic_loss.backward()
+        self.critic_opt.step()
 
-        # maximize expected return = minimize -expected return
-        loss = - \
-            torch.sum(torch.stack(
-                [lp * adv for lp, adv in zip(log_probs, advantages)]))
-        self.opt.zero_grad()
-        loss.backward()
-        self.opt.step()
+        # Update actor to maximize expected advantage
+        actor_loss = -torch.sum(torch.stack(log_probs) * advantages.detach())
+        self.actor_opt.zero_grad()
+        actor_loss.backward()
+        self.actor_opt.step()
 
     def train(self):
         print(
