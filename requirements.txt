@@ -3,3 +3,5 @@ gymnasium
 numpy
 pandas
 matplotlib
+box2d
+pygame
