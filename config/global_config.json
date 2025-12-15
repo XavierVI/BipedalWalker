@@ -1,7 +1,7 @@
 {
     "seed": 42,
-    "env_name": "BipedalWalker-v3",
-    "action_space_type": "continuous",
+    "env_name": "CartPole-v1",
+    "action_space_type": "discrete",
     "display": true,
     "display_episodes":100,
     "num_episodes": 3000,
@@ -11,7 +11,7 @@
     "learning_rate": 0.001,
     "gamma": 0.99,
 
-    "algorithm": "reinforce",
+    "algorithm": "sarsa",
     
     "reinforce_initial_epsilon": 1.0,
     "reinforce_min_epsilon": 0.001,

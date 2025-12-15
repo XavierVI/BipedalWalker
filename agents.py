@@ -114,14 +114,14 @@ class BaseAgent(ABC):
         self.max_steps = cfg.get("max_steps", 200)
         
         # Exploration parameters
-        self.use_boltzmann = cfg.get(f"{self._get_agent_prefix()}_use_boltzmann", False)
-        self._setup_exploration_params(cfg)
+        # let each one decide if they want to set up these parameters
+        # self._setup_exploration_params(cfg)
         
     def _setup_action_dim(self, cfg):
         """Setup action dimension based on action space type."""
         try:
-            action_space_type = cfg["action_space_type"]
-            if action_space_type == "continuous":
+            self.action_space_type = cfg["action_space_type"]
+            if self.action_space_type == "continuous":
                 self.action_dim = self.env.action_space.shape[0]
             else:
                 self.action_dim = self.env.action_space.n
@@ -131,6 +131,8 @@ class BaseAgent(ABC):
     
     def _setup_exploration_params(self, cfg):
         """Setup epsilon-greedy or Boltzmann exploration parameters."""
+        self.use_boltzmann = cfg.get(
+            f"{self._get_agent_prefix()}_use_boltzmann", False)
         prefix = self._get_agent_prefix()
         
         try:
@@ -443,15 +445,33 @@ class ReinforceAgent(BaseAgent):
 class A2CAgent(BaseAgent):
     def __init__(self, cfg):
         super().__init__(cfg)
-        
+
         if self.action_space_type == "continuous":
-            self.policy = ContinuousPolicyNet(cfg)
+            self.actor = ContinuousPolicyNet(
+                self.state_dim,
+                self.action_dim,
+                cfg["actor_hidden_layers"],
+                cfg["activation_function"]
+            ).to(self.device)
         else:
-            self.actor = PolicyNet(cfg)
-        self.critic = ValueNet(cfg)
+            self.actor = PolicyNet(
+                self.state_dim,
+                self.action_dim,
+                cfg["actor_hidden_layers"],
+                cfg["activation_function"]
+            ).to(self.device)
+
+        # critic is producing values (V(s)), so it only needs to produce one output value
+        self.critic = ValueNet(
+            self.state_dim,
+            1,
+            cfg["critic_hidden_layers"],
+            cfg["activation_function"]
+        ).to(self.device)
 
         # Optimizers
-        self.actor_opt = optim.Adam(self.actor.parameters(), lr=cfg["learning_rate"])
+        self.actor_opt = optim.Adam(
+            self.actor.parameters(), lr=cfg["learning_rate"])
         self.critic_opt = optim.Adam(self.critic.parameters(), lr=cfg["learning_rate"])
         
         # Criterion
@@ -472,57 +492,30 @@ class A2CAgent(BaseAgent):
 
 
     def select_action(self, state: np.array):
-        """Action selection from the actor."""
+        """Sample action from actor network."""
         state_t = torch.FloatTensor(state).unsqueeze(0).to(self.device)
 
         if self.action_space_type == "continuous":
-            # Continuous action space using Gaussian policy
             mean, log_std = self.actor(state_t)
             mean = mean.squeeze()
             log_std = log_std.squeeze()
             std = torch.exp(log_std)
-
-            # Add temperature/exploration scaling
-            if self.use_boltzmann:
-                std = std * self.tau
-
-            # Sample action from Gaussian distribution
+            
             dist = torch.distributions.Normal(mean, std)
             action_t = dist.sample()
             action_t = torch.clamp(action_t, -1, 1)
-
-            # Compute log probability by summing over action dimensions
             log_prob = dist.log_prob(action_t).sum()
-
+            
             return action_t.cpu().numpy(), log_prob
-
-        else:  # Discrete action space
+        
+        else:  # Discrete
             logits_t, probs_t = self.actor(state_t)
-            logits_t = logits_t.squeeze()
             probs_t = probs_t.squeeze()
-
-            if self.use_boltzmann:
-                # Numerically stable softmax with temperature
-                scaled_logits = logits_t / self.tau
-                boltz_probs = torch.softmax(scaled_logits, dim=-1)
-                action = torch.multinomial(boltz_probs, 1).item()
-                log_prob = torch.log(torch.clamp(
-                    boltz_probs[action], min=1e-8))
-
-                return action, log_prob
-
-            else:
-                # Epsilon-greedy
-                if np.random.rand() < self.epsilon:
-                    action = np.random.randint(self.action_dim)
-                else:
-                    # create a categorical distribution over the actions
-                    dist = torch.distributions.Categorical(probs=probs_t)
-                    # sample an action from the distribution
-                    action = dist.sample()
-                    action = action.item()
-
-            log_prob = torch.log(torch.clamp(probs_t[action], min=1e-8))
+            
+            dist = torch.distributions.Categorical(probs=probs_t)
+            action = dist.sample().item()
+            log_prob = dist.log_prob(torch.tensor(action, device=self.device))
+            
             return action, log_prob
 
 
@@ -575,8 +568,9 @@ class A2CAgent(BaseAgent):
             targets (torch.Tensor): list of target values for each state-action pair.
         """
         with torch.no_grad():
-            advantages = torch.zeros(N, device=self.device)
-            gae = 0.0
+            # gaes = advantages
+            gaes = torch.zeros_like(rewards_t, device=self.device)
+            future_gae = torch.tensor(0.0, dtype=rewards_t.dtype, device=self.device)
 
             for t in reversed(range(N)):
                 # TD error: δ_t = r_t + γ*V(s_{t+1}) - V(s_t)
@@ -584,13 +578,12 @@ class A2CAgent(BaseAgent):
                     Vs[t + 1] * (1 - dones_t[t]) - Vs[t]
 
                 # GAE: A_t = δ_t + (γλ)*δ_{t+1} + (γλ)^2*δ_{t+2} + ...
-                gae = delta + self.gamma * \
-                    self.lambda_ * (1 - dones_t[t]) * gae
-                advantages[t] = gae
+                gaes[t] = delta + self.gamma * self.lambda_ * (1 - dones_t[t]) * future_gae
+                future_gae = gaes[t]
 
             # Target is V(s) + A(s,a)
-            targets = Vs[:-1] + advantages
-            return advantages, targets
+            targets = Vs[:-1] + gaes
+            return gaes, targets
 
     def update(self, log_probs, rewards, states, dones):
         """
@@ -606,6 +599,12 @@ class A2CAgent(BaseAgent):
         states_t = torch.FloatTensor(states).to(self.device)
         rewards_t = torch.FloatTensor(rewards).to(self.device)
         dones_t = torch.FloatTensor(dones).to(self.device)
+
+        # Ensure the correct shapes
+        assert len(states_t) == N + 1
+        assert len(rewards_t) == N
+        assert len(dones_t) == N
+        assert len(log_probs) == N
         
         # Compute all state values at once
         Vs = self.critic(states_t).squeeze()
@@ -617,7 +616,7 @@ class A2CAgent(BaseAgent):
         )
         
         # Update critic to minimize TD error        
-        critic_loss = self.criterion(Vs, targets)
+        critic_loss = self.criterion(Vs[:-1], targets)
         self.critic_opt.zero_grad()
         critic_loss.backward()
         self.critic_opt.step()
@@ -630,23 +629,26 @@ class A2CAgent(BaseAgent):
 
     def train(self):
         print(
-            f"Starting training with parameters gamma={self.gamma}, use_boltzmann={self.use_boltzmann}...")
+            f"Starting training for A2C...")
         rewards_all = []
 
         for ep in range(self.num_episodes):
             env = self.get_env(ep)
             state, _ = env.reset()
-            log_probs, rewards, states = [], [], []
+            log_probs, rewards, states, dones = [], [], [], []
             total = 0
 
+            states.append(state)
+            
             for t in range(self.max_steps):
                 action, log_prob = self.select_action(state)
-                log_probs.append(log_prob)
-
                 next_state, reward, done, trunc, _ = env.step(action)
 
+                log_probs.append(log_prob)
                 rewards.append(reward)
-                states.append(state)
+                states.append(next_state)
+                dones.append(done or trunc)
+            
                 total += reward
                 state = next_state
 
@@ -658,8 +660,9 @@ class A2CAgent(BaseAgent):
 
             # convert to numpy array for better performance
             states = np.array(states)
-            self.update(log_probs, rewards, states)
-            self.decay_epsilon()
+            self.update(log_probs, rewards, states, dones)
+            # TODO: Add entropy regularization call here
+            # self.decay_epsilon()
             rewards_all.append(total)
             self.print_progress(ep, total, rewards_all)
 

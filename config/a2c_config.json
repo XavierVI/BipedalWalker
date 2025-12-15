@@ -1,26 +1,21 @@
 {
+    "algorithm": "a2c",
     "seed": 42,
     "env_name": "BipedalWalker-v3",
-    "action_space_type": "continuous",
     "display": true,
     "display_episodes":100,
-    "num_episodes": 3000,
-    "max_steps": 500,
+
+    "action_space_type": "continuous",
     "actor_hidden_layers": [128, 128],
     "critic_hidden_layers": [128, 128],
-    
     "activation_function": "relu",
-    "learning_rate": 0.001,
-    "gamma": 0.99,    
 
-    "initial_epsilon": 1.0,
-    "min_epsilon": 0.001,
-    "decay_rate": 0.01,
-    "initial_tau": 2.0,
-    "min_tau": 0.1,
-    "decay_rate_tau": 0.001,
-    "use_boltzmann": true,
+    "num_episodes": 3000,
+    "max_steps": 500,
+    "learning_rate": 0.001,
+    "gamma": 0.99,
     
     "use_gae": true,
-    "lambda": 0.95
+    "lambda": 0.95,
+    "n_steps": 5
 }

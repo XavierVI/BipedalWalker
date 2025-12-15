@@ -84,7 +84,7 @@ def parallel_main(processes=os.cpu_count()):
         pool.starmap(run_training, args)
 
 
-def main():
+def main(config_file_name):
     """
     This will run the trainer with the hyperparameters from the JSON file.
     """
@@ -93,12 +93,18 @@ def main():
     #                     Loading JSON Config File                    #
     # --------------------------------------------------------------- #
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    config_path = os.path.join(script_dir, "config", "global_config.json")
+    config_path = os.path.join(script_dir, "config", config_file_name)
 
     with open(config_path, "r") as f:
         cfg = json.load(f)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print("=" * 50)
+    print("*")
+    print(f"* Using config file: {config_path}")
+    print(f"* Using device: {device}")
+    print("*")
+    print("=" * 50)
     # add device to cfg
     cfg["device"] = device
     np.random.seed(cfg["seed"])
@@ -110,6 +116,7 @@ def main():
     agent_class_map = {
         "reinforce": ReinforceAgent,
         "sarsa": SarsaAgent,
+        "a2c": A2CAgent,
         # "QLearningAgent": QLearningAgent
     }
     
@@ -122,7 +129,7 @@ def main():
 
 if __name__ == "__main__":
     """
-    usage: python sarsa.py [--parallel] [--num_processes=<int>]
+    usage: python main.py [--parallel] [--num_processes=<int>]
     """
     parser = argparse.ArgumentParser()
 
@@ -137,8 +144,8 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        "--config_file", type=str, default="global_config.json",
-        help="Path to the global configuration file."
+        "--config_file_name", type=str, default="global_config.json",
+        help="Name of the configuration file in the config directory."
     )
 
     args = parser.parse_args()
@@ -146,4 +153,4 @@ if __name__ == "__main__":
     if args.parallel:
         parallel_main(args.num_processes)
     else:
-        main()
+        main(args.config_file_name)
