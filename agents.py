@@ -6,92 +6,11 @@ import torch.nn.functional as F
 import torch.optim as optim
 from abc import ABC, abstractmethod
 
-# --------------------------------------------------------------- #
-#                     Policy Class Definitions                    #
-# --------------------------------------------------------------- #
-class ValueNet(nn.Module):
-    def __init__(self, s_dim, a_dim, hidden, act):
-        super().__init__()
-
-        act_fn = getattr(F, act)
-        self.layers = nn.ModuleList()
-        prev = s_dim
-
-        for h in hidden:
-            self.layers.append(nn.Linear(prev, h))
-            prev = h
-
-        self.out = nn.Linear(prev, a_dim)
-        self.act_fn = act_fn
-
-    def forward(self, x):
-        for l in self.layers:
-            x = self.act_fn(l(x))
-
-        return self.out(x)
-
-
-class PolicyNet(nn.Module):
-    """Policy network for discrete action spaces."""
-    def __init__(self, s_dim, a_dim, hidden, act):
-        super().__init__()
-
-        # this dynamically gets the activation function from torch.nn.functional
-        act_fn = getattr(F, act)
-        print(f"Using activation function: {act}")
-        self.layers = nn.ModuleList()
-        prev = s_dim
-        
-        for h in hidden:
-            self.layers.append(nn.Linear(prev, h))
-            prev = h
-        
-        self.out = nn.Linear(prev, a_dim)
-        self.act_fn = act_fn
-    
-    def forward(self, x):
-        for l in self.layers:
-            x = self.act_fn(l(x))
-
-        x = self.out(x)
-
-        # return logits and action probabilities
-        return x, F.softmax(x, dim=-1)
-
-
-class ContinuousPolicyNet(nn.Module):
-    """Policy network for continuous action spaces using Gaussian policy."""
-    def __init__(self, s_dim, a_dim, hidden, act):
-        super().__init__()
-
-        act_fn = getattr(F, act)
-        print(f"Using activation function: {act}")
-        self.layers = nn.ModuleList()
-        prev = s_dim
-        
-        for h in hidden:
-            self.layers.append(nn.Linear(prev, h))
-            prev = h
-        
-        # Output mean and log_std for Gaussian policy
-        self.mean = nn.Linear(prev, a_dim)
-        self.log_std = nn.Linear(prev, a_dim)
-        self.act_fn = act_fn
-    
-    def forward(self, x):
-        for l in self.layers:
-            x = self.act_fn(l(x))
-
-        mean = torch.tanh(self.mean(x))  # Bound mean to [-1, 1]
-        log_std = self.log_std(x)
-        log_std = torch.clamp(log_std, -20, 2)  # Prevent numerical instability
-        
-        return mean, log_std
-
+from networks import *
 
 
 # --------------------------------------------------------------- #
-#                     Agent Class Definitions                     #
+#                     Base Agent Class Definition                 #
 # --------------------------------------------------------------- #
 class BaseAgent(ABC):
     """Abstract base class for all agents with common functionality."""
@@ -103,11 +22,11 @@ class BaseAgent(ABC):
         self.display = cfg.get("display", False)
         self.device = cfg.get("device", torch.device("cpu"))
         
-        # State and action dimensions
+        # Read state and action dimensions
         self.state_dim = self.env.observation_space.shape[0]
         self._setup_action_dim(cfg)
         
-        # Common hyperparameters
+        # Setup common hyperparameters
         self.gamma = cfg["gamma"]
         self.render_int = cfg.get("display_episodes", 100)
         self.num_episodes = cfg.get("num_episodes", cfg.get("episodes", 1000))
@@ -148,14 +67,24 @@ class BaseAgent(ABC):
 
         except KeyError:
             raise ValueError(f"Missing exploration parameters for agent type: {prefix}")
+
+        if self.use_boltzmann:
+            self.exp_strat = "boltzmann"
+        else:
+            self.exp_strat = "epsilon"
+
+    def _setup_entropy_params(self, cfg):
+        self.exp_strat = "entropy_reg"
+        self.use_entropy_regularization = cfg["use_entropy_reg"]
+        self.beta = cfg["beta"]
     
     @abstractmethod
     def _get_agent_prefix(self):
         """Return the config prefix for this agent type (e.g., 'sarsa', 'reinforce')."""
         pass
     
-    def decay_epsilon(self):
-        """Decay epsilon or tau for exploration."""
+    def decay_exploration_param(self):
+        """Decay epsilon or tau."""
         if self.use_boltzmann:
             self.tau = max(self.min_tau, self.tau * np.exp(-self.decay_rate_tau))
         else:
@@ -168,8 +97,17 @@ class BaseAgent(ABC):
     def print_progress(self, episode, total_reward, rewards_history):
         """Print training progress."""
         if (episode + 1) % self.render_int == 0:
-            avg_reward = np.mean(rewards_history[-20:]) if rewards_history else 0
-            exploration_param = f"τ={self.tau:.3f}" if self.use_boltzmann else f"ε={self.epsilon:.3f}"
+            avg_reward = np.mean(rewards_history[-20:])
+
+            if self.exp_strat == "epsilon":
+                exploration_param = f"ε={self.epsilon:.3f}"
+            elif self.exp_strat == "boltzmann":
+                exploration_param = f"τ={self.tau:.3f}"
+            elif self.exp_strat == "entropy_reg":
+                exploration_param = f"β={self.beta:.3f}"
+            else:
+                exploration_param = ""
+
             print(f"Episode {episode+1}/{self.num_episodes} | Reward {total_reward:.1f} | "
                   f"Avg {avg_reward:.1f} | {exploration_param}", flush=True)
     
@@ -187,6 +125,7 @@ class BaseAgent(ABC):
 class SarsaAgent(BaseAgent):
     def __init__(self, cfg):
         super().__init__(cfg)
+        self._setup_exploration_params(cfg)
         
         # Policy network, optimizer, and loss function
         self.q_net = ValueNet(
@@ -290,7 +229,7 @@ class SarsaAgent(BaseAgent):
 
             rewards_all.append(total)
             self.print_progress(m, total, rewards_all)
-            self.decay_epsilon()
+            self.decay_exploration_param()
 
         return rewards_all
 
@@ -298,6 +237,7 @@ class SarsaAgent(BaseAgent):
 class ReinforceAgent(BaseAgent):
     def __init__(self, cfg):
         super().__init__(cfg)
+        self._setup_exploration_params(cfg)
         
         self.use_baseline = cfg.get("reinforce_use_baseline", False)
         self.action_space_type = cfg.get("action_space_type", "discrete")
@@ -435,7 +375,7 @@ class ReinforceAgent(BaseAgent):
             # convert to numpy array for better performance
             states = np.array(states)
             self.update(log_probs, rewards, states)
-            self.decay_epsilon()
+            self.decay_exploration_param()
             rewards_all.append(total)
             self.print_progress(ep, total, rewards_all)
 
@@ -445,6 +385,7 @@ class ReinforceAgent(BaseAgent):
 class A2CAgent(BaseAgent):
     def __init__(self, cfg):
         super().__init__(cfg)
+        self._setup_entropy_params(cfg)
 
         if self.action_space_type == "continuous":
             self.actor = ContinuousPolicyNet(
@@ -483,9 +424,9 @@ class A2CAgent(BaseAgent):
         self.N = cfg["n_steps"]
 
         if self.use_gae:
-            self.approx_func = self._gae
+            self.approx_func = self.gae
         else:
-            self.approx_func = self._N_step_return
+            self.approx_func = self.N_step_return
     
     def _get_agent_prefix(self):
         return "a2c"
@@ -505,21 +446,23 @@ class A2CAgent(BaseAgent):
             action_t = dist.sample()
             action_t = torch.clamp(action_t, -1, 1)
             log_prob = dist.log_prob(action_t).sum()
+            entropy = dist.entropy().sum()
             
-            return action_t.cpu().numpy(), log_prob
+            return action_t.cpu().numpy(), log_prob, entropy
         
         else:  # Discrete
-            logits_t, probs_t = self.actor(state_t)
+            _, probs_t = self.actor(state_t)
             probs_t = probs_t.squeeze()
             
             dist = torch.distributions.Categorical(probs=probs_t)
             action = dist.sample().item()
             log_prob = dist.log_prob(torch.tensor(action, device=self.device))
+            entropy = dist.entropy().sum()
             
-            return action, log_prob
+            return action, log_prob, entropy
 
 
-    def _N_step_return(self, rewards_t, dones_t, Vs, N):
+    def N_step_return(self, rewards_t, dones_t, Vs, N):
         """
         Computes the advantages and target values using the
         N-step approximation for Q(s, a).
@@ -551,7 +494,7 @@ class A2CAgent(BaseAgent):
 
             return advantages, targets
 
-    def _gae(self, rewards_t, dones_t, Vs, N):
+    def gae(self, rewards_t, dones_t, Vs, N):
         """
         This function computes the advantages and target values using the
         Generalized Advantage Estimation (GAE).
@@ -585,7 +528,7 @@ class A2CAgent(BaseAgent):
             targets = Vs[:-1] + gaes
             return gaes, targets
 
-    def update(self, log_probs, rewards, states, dones):
+    def update(self, log_probs, entropies, rewards, states, dones):
         """
         Update both the actor and the critic networks.
 
@@ -623,6 +566,11 @@ class A2CAgent(BaseAgent):
 
         # Update actor to maximize expected advantage
         actor_loss = -torch.sum(torch.stack(log_probs) * advantages.detach())
+
+        if self.use_entropy_regularization:
+            # Add entropy regularization term
+            entropies_t = torch.stack(entropies).to(self.device)
+            actor_loss += -self.beta * entropies_t.sum()
         self.actor_opt.zero_grad()
         actor_loss.backward()
         self.actor_opt.step()
@@ -635,16 +583,18 @@ class A2CAgent(BaseAgent):
         for ep in range(self.num_episodes):
             env = self.get_env(ep)
             state, _ = env.reset()
-            log_probs, rewards, states, dones = [], [], [], []
+            log_probs, entropies = [], []
+            rewards, states, dones = [], [], []
             total = 0
 
             states.append(state)
             
             for t in range(self.max_steps):
-                action, log_prob = self.select_action(state)
+                action, log_prob, entropy = self.select_action(state)
                 next_state, reward, done, trunc, _ = env.step(action)
 
                 log_probs.append(log_prob)
+                entropies.append(entropy)
                 rewards.append(reward)
                 states.append(next_state)
                 dones.append(done or trunc)
@@ -660,9 +610,9 @@ class A2CAgent(BaseAgent):
 
             # convert to numpy array for better performance
             states = np.array(states)
-            self.update(log_probs, rewards, states, dones)
+            self.update(log_probs, entropies, rewards, states, dones)
             # TODO: Add entropy regularization call here
-            # self.decay_epsilon()
+            # self.decay_exploration_param()
             rewards_all.append(total)
             self.print_progress(ep, total, rewards_all)
 

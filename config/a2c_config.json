@@ -17,5 +17,8 @@
     
     "use_gae": true,
     "lambda": 0.95,
-    "n_steps": 5
+    "n_steps": 5,
+
+    "use_entropy_reg": true,
+    "beta": 0.01
 }
