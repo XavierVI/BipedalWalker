@@ -619,6 +619,10 @@ class A2CAgent(BaseAgent):
         return rewards_all
 
 
+    def train_parallel(self):
+        pass
+
+
 class PPOAgent(BaseAgent):
     def __init__(self, cfg):
         super().__init__(cfg)
