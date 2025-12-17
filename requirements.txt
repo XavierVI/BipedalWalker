@@ -3,5 +3,5 @@ gymnasium
 numpy
 pandas
 matplotlib
-box2d
-pygame
+gymnasium[box2d]
+pygame>=2.1.3
