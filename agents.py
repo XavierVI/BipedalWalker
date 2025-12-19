@@ -476,6 +476,9 @@ class A2CAgent(BaseAgent):
             rewards_t, dones_t, Vs, T
         )
 
+        # normalize advantages
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+
         # Update critic to minimize TD error        
         critic_loss = self.criterion(Vs[:-1], targets)
         self.critic_opt.zero_grad()
@@ -503,8 +506,6 @@ class A2CAgent(BaseAgent):
 
         if self.env.action_space_type == "continuous":
             mean, log_std = self.actor(state_t)
-            mean = mean.squeeze()
-            log_std = log_std.squeeze()
             std = torch.exp(log_std)
 
             dist = torch.distributions.Normal(mean, std)
@@ -519,8 +520,8 @@ class A2CAgent(BaseAgent):
 
             dist = torch.distributions.Categorical(probs=probs_t)
             action_t = dist.sample()
-            log_prob_t = dist.log_prob(action_t).sum(dim=-1)
-            entropy_t = dist.entropy().sum(dim=-1)
+            log_prob_t = dist.log_prob(action_t)
+            entropy_t = dist.entropy()
 
         # we need to save the log prob and entropy grads
         # for the update step
@@ -539,6 +540,7 @@ class A2CAgent(BaseAgent):
 
             states.append(state)
             
+            # collect rollout
             for t in range(self.max_steps):
                 actions, log_probs_t, entropies_t = self.select_action(state)
                 next_state, reward, done, trunc, _ = env.step(actions)
@@ -553,14 +555,16 @@ class A2CAgent(BaseAgent):
 
                 self.env.render(ep)
 
+                # if done, reset the environment and continue
+                # collecting data
                 if self.env.num_envs == 1:
                     total += reward
                     if done or trunc:
-                        break
+                        state, _ = env.reset()
                 else:
                     total += np.mean(reward)
                     if any(done) or any(trunc):
-                        break
+                        state, _ = env.reset()
 
             # convert to numpy array for better performance
             states = np.array(states)

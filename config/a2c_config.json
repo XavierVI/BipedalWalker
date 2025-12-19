@@ -3,26 +3,26 @@
     "seed": 42,
     "env_name": "BipedalWalker-v3",
     "parallel_envs": true,
-    "num_envs": 4,
-    "display": true,
-    "display_episodes":100,
+    "num_envs": 16,
+    "display": false,
+    "display_episodes":1,
 
     "action_space_type": "continuous",
-    "actor_hidden_layers": [128, 128],
-    "critic_hidden_layers": [128, 128],
+    "actor_hidden_layers": [256, 256],
+    "critic_hidden_layers": [256, 256],
     "activation_function": "relu",
 
-    "num_episodes": 3000,
-    "max_steps": 500,
-    "learning_rate": 0.001,
+    "num_episodes": 10000000,
+    "max_steps": 1600,
+    "learning_rate": 0.0007,
     "gamma": 0.99,
     
     "use_gae": true,
-    "lambda": 0.95,
+    "lambda": 0.97,
     "n_steps": 5,
 
     "exp_strat": "entropy_reg",
-    "beta": 0.1,
+    "beta": 0.001,
     "min_beta": 0.01,
     "entropy_decay": 0.99
 }

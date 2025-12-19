@@ -12,10 +12,13 @@ from agents import *
 
 
 
-def save_rewards_to_csv(rewards, lr, gamma, use_boltzmann):
+def save_rewards_to_csv(rewards, lr, gamma, use_boltzmann, file_name=None):
     # save rewards data to a CSV file using numpy
     os.makedirs("results", exist_ok=True)
-    filename = f"results/lr-{lr}_gamma-{gamma}_boltzmann-{use_boltzmann}.csv"
+    if file_name is not None:
+        filename = file_name
+    else:
+        filename = f"results/lr-{lr}_gamma-{gamma}_boltzmann-{use_boltzmann}.csv"
     exists = os.path.exists(filename)
     
     # Create array with episodes and rewards
@@ -124,7 +127,14 @@ def main(config_file_name):
     trainer = agent_class(cfg)
     rewards = trainer.train()
     
-    save_rewards_to_csv(rewards, cfg["learning_rate"], cfg["gamma"], cfg.get("use_boltzmann", False))
+    save_rewards_to_csv(
+        rewards,
+        cfg["learning_rate"],
+        cfg["gamma"],
+        cfg.get("use_boltzmann",
+        False),
+        file_name=f"results/{config_file_name.replace('.json', '')}_rewards.csv"
+    )
 
 
 if __name__ == "__main__":
