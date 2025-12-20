@@ -141,7 +141,7 @@ def parallel_main(processes=os.cpu_count()):
         pool.starmap(run_training, args)
 
 
-def main(config_file_name, profile=False):
+def main(config_file_name):
     """
     This will run the trainer with the hyperparameters from the JSON file.
     """
@@ -177,19 +177,19 @@ def main(config_file_name, profile=False):
         # "QLearningAgent": QLearningAgent
     }
 
-    if profile:
-        run_name = config_file_name.replace('.json', '')
-        log_dir = f"./profiler/{run_name}"
-        os.makedirs(log_dir, exist_ok=True)
-        with init_profiler() as prof:
-            agent_class = agent_class_map[cfg["algorithm"]]
-            trainer = agent_class(cfg)
-            rewards = trainer.train(profiler=prof)
-        export_profiler_artifacts(prof, out_dir=log_dir, run_name=run_name)
-    else:
-        agent_class = agent_class_map[cfg["algorithm"]]
-        trainer = agent_class(cfg)
-        rewards = trainer.train()
+    # if profile:
+    #     run_name = config_file_name.replace('.json', '')
+    #     log_dir = f"./profiler/{run_name}"
+    #     os.makedirs(log_dir, exist_ok=True)
+    #     with init_profiler() as prof:
+    #         agent_class = agent_class_map[cfg["algorithm"]]
+    #         trainer = agent_class(cfg)
+    #         rewards = trainer.train(profiler=prof)
+    #     export_profiler_artifacts(prof, out_dir=log_dir, run_name=run_name)
+    # else:
+    agent_class = agent_class_map[cfg["algorithm"]]
+    trainer = agent_class(cfg)
+    rewards = trainer.train()
     
     save_rewards_to_csv(
         rewards,
@@ -233,4 +233,4 @@ if __name__ == "__main__":
     if args.parallel:
         parallel_main(args.num_processes)
     else:
-        main(args.config, args.profile)
+        main(args.config)
