@@ -7,6 +7,11 @@ The goal of this project was to practice fundamentals in machine learning. Speci
 This project requires the packages in `requirements.txt`.
 
 
+# Training DETR-RESNET-50
+
+
+
+
 # References
 1. [Gymnasium Docs](https://gymnasium.farama.org/)
 2. [Wikipedia: Moving Average]()
@@ -15,3 +20,4 @@ This project requires the packages in `requirements.txt`.
 5. [Water Programming: Implementation of the Moving Average Filter Using Convolution](https://waterprogramming.wpcomstaging.com/2018/09/04/implementation-of-the-moving-average-filter-using-convolution/)
 6. [VizDoom Repository](https://github.com/Farama-Foundation/ViZDoom)
 7. [VizDoom Documentation](https://vizdoom.cs.put.edu.pl/)
+8. [Hugging Face: facebook/detr-resnet-50](https://huggingface.co/facebook/detr-resnet-50)

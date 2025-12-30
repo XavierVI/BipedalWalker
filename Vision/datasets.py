@@ -4,24 +4,30 @@ from pycocotools.coco import COCO
 from PIL import Image
 
 
-class CocoDetection(Dataset):
+class CocoDoomDataset(Dataset):
     """Custom COCO dataset for DETR training."""
 
-    def __init__(self, img_folder, annotation_file, processor, catid2contig, augment=False):
+    def __init__(self, data_dir, annotation_file_name, processor):
         """
         Args:
-            img_folder: Path to image folder
-            annotation_file: Path to COCO format JSON annotation file
+            data_dir: Path to dataset
             processor: DETR image processor for preprocessing
-            catid2contig: Mapping from original COCO category ids to contiguous ids
-            augment: Whether to apply data augmentation
         """
-        self.img_folder = img_folder
+        # load COCO annotation
+        annotation_file = os.path.join(
+            data_dir, annotation_file_name)
+
+        self.img_folder = data_dir
         self.coco = COCO(annotation_file)
         self.processor = processor
-        self.catid2contig = catid2contig
-        self.augment = augment
+        self.id2label = self.coco.loadCats(self.coco.getCatIds())
         self.ids = list(sorted(self.coco.imgs.keys()))
+
+        print(f"Loaded {annotation_file_name}")
+        print(f"Training set: {len(self.coco.imgs)} images")
+        print(f"Validation set: {len(self.coco.imgs)} images")
+        print(f"Test set: {len(self.coco.imgs)} images")
+        print(f"Number of Categories: {len(self.coco.getCatIds())}")
 
     def __len__(self):
         return len(self.ids)
