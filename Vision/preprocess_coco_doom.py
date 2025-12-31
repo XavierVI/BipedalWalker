@@ -3,6 +3,7 @@ import torch
 from transformers import DetrImageProcessor
 from datasets import CocoDoomDataset
 from PIL import Image
+from tqdm import tqdm
 import sys
 import os
 sys.path.append(os.path.join(os.pardir))
@@ -30,16 +31,16 @@ test_dataset = CocoDoomDataset(
 )
 
 
-def preprocess_and_save_dataset(dataset):
-    for i in range(len(dataset)):
-        # fetch the image
+def preprocess_and_save_dataset(dataset, split_name):
+    saved, skipped = 0, 0
+    save_root = os.path.join(
+        os.pardir, os.pardir, "datasets", "cocodoom", "preprocessed"
+    )
+    os.makedirs(save_root, exist_ok=True)
+
+    for i in tqdm(range(len(dataset)), desc=f"Preprocessing {split_name}"):
         image, target, img_file_name = dataset.get_image(i)
-        # ann = dataset.get_annotation(i)
 
-        print(f"Image {i} - file name: {img_file_name}")
-        print(f"Target (before): {target}")
-
-        # preprocess the image
         encoding = processor(
             images=image,
             annotations=target,
@@ -62,33 +63,30 @@ def preprocess_and_save_dataset(dataset):
 
         # modify file name to have .pt extension
         pt_file_name = os.path.splitext(img_file_name)[0] + ".pt"
-
-        print(f"Image {i} processed with shape: {encoding['pixel_values'].shape}")
-        save_path = os.path.join(
-            os.pardir, os.pardir,
-            "datasets", "cocodoom", "preprocessed", pt_file_name)
+        save_path = os.path.join(save_root, pt_file_name)
 
         if not os.path.exists(os.path.dirname(save_path)):
-            os.makedirs(os.path.dirname(save_path))
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
 
         if os.path.exists(save_path):
-            print(f"File {save_path} already exists. Skipping save.")
-        else:
-            print(f"Saving to: {save_path}")
-            # save the processed data
-            torch.save(
-                {
-                    "pixel_values": pixel_values,
-                    "labels": target
-                },
-                save_path
-            )
+            skipped += 1
+            continue
+
+        torch.save(
+            {
+                "pixel_values": pixel_values,
+                "labels": target
+            },
+            save_path
+        )
+        saved += 1
+
+    print(f"{split_name}: saved {saved}, skipped {skipped}")
 
 
 # Preprocess and save datasets
-# print("Preprocessing and saving validation dataset...")
-# preprocess_and_save_dataset(val_dataset)
-print("Preprocessing and saving test dataset...")
-preprocess_and_save_dataset(test_dataset)
-# print("Preprocessing and saving training dataset...")
-# preprocess_and_save_dataset(train_dataset)
+print("Preprocessing training dataset...")
+preprocess_and_save_dataset(train_dataset, "train")
+print("Preprocessing validation dataset...")
+preprocess_and_save_dataset(val_dataset, "val")
+# preprocess_and_save_dataset(test_dataset, "test")

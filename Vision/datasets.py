@@ -11,7 +11,8 @@ class CocoDoomDataset(torchvision.datasets.CocoDetection):
     Custom COCO dataset for training a DETR model.
     """
 
-    def __init__(self, data_dir, annotation_file_name, processor):
+    def __init__(self, data_dir, annotation_file_name, 
+        processor):
         """
         Args:
             data_dir: Path to dataset
@@ -42,7 +43,7 @@ class CocoDoomDataset(torchvision.datasets.CocoDetection):
         return len(self.ids)
 
     # def get_preprocessed_item(self, idx):
-    def __getitem__(self, idx):
+    def fast__getitem__(self, idx):
         """
         Get a single preprocessed image and target.
         
@@ -60,7 +61,7 @@ class CocoDoomDataset(torchvision.datasets.CocoDetection):
         
         return pixel_values, target
 
-    def slow__getitem__(self, idx):
+    def __getitem__(self, idx):
         """
         Get a single image and its target.
 

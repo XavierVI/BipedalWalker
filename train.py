@@ -53,9 +53,9 @@ def create_datasets(processor):
 def main():
     optimizer_lr = 1e-5
     weight_decay = 1e-4
-    batch_size = 4
+    batch_size = 8
     num_epochs = 10
-    workers = 4
+    workers = 16
     
     # Training setup
     device = torch.device(
