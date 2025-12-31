@@ -41,7 +41,8 @@ class CocoDoomDataset(torchvision.datasets.CocoDetection):
     def __len__(self):
         return len(self.ids)
 
-    def get_preprocessed_item(self, idx):
+    # def get_preprocessed_item(self, idx):
+    def __getitem__(self, idx):
         """
         Get a single preprocessed image and target.
         
@@ -52,16 +53,14 @@ class CocoDoomDataset(torchvision.datasets.CocoDetection):
         img_path = os.path.join(
             self.img_folder, "preprocessed", img_info['file_name'])
         img_path = img_path.replace('.png', '.pt')
-        
-        print(f"Loading preprocessed data from: {img_path}")
-        
-        data = torch.load(img_path, weights_only=False)
+                
+        data = torch.load(img_path, weights_only=True)
         pixel_values = data['pixel_values']
         target = data['labels']
         
         return pixel_values, target
 
-    def __getitem__(self, idx):
+    def slow__getitem__(self, idx):
         """
         Get a single image and its target.
 
