@@ -21,3 +21,4 @@ This project requires the packages in `requirements.txt`.
 6. [VizDoom Repository](https://github.com/Farama-Foundation/ViZDoom)
 7. [VizDoom Documentation](https://vizdoom.cs.put.edu.pl/)
 8. [Hugging Face: facebook/detr-resnet-50](https://huggingface.co/facebook/detr-resnet-50)
+9. [Hugging Face: DETR](https://huggingface.co/docs/transformers/en/model_doc/detr) This contains some information on DETR models and how to train them.
