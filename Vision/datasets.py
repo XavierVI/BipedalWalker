@@ -104,8 +104,39 @@ class CocoDoomDataset(torchvision.datasets.CocoDetection):
         img, target = super(CocoDoomDataset, self).__getitem__(idx)
         img_id = self.ids[idx]
         img_info = self.coco.loadImgs(img_id)[0]
-        target = {'image_id': img_id, 'annotations': target}
+        remapped_annotations = []
+        for ann in target:
+            ann_copy = ann.copy()
+            ann_copy['category_id'] = self.cat_id_to_contiguous_id[ann['category_id']]
+            remapped_annotations.append(ann_copy)
+
+        target = {'image_id': img_id, 'annotations': remapped_annotations}
         return img, target, img_info["file_name"]
+
+
+class CachedDataset(Dataset):
+    def __init__(self, dataset, cache_size_gb=8):
+        self.dataset = dataset
+        self.cache = {}
+
+        # use uniform distribution to sample what idx should be cached
+        dist = torch.distributions.Uniform(0, len(dataset))
+        approx_item_size = 0.012 # in GB
+        num_items_to_cache = int(cache_size_gb / approx_item_size)
+        sampled_indices = dist.sample((num_items_to_cache,)).long().tolist()
+
+        for idx in sampled_indices:
+            self.cache[idx] = dataset[idx]
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, idx):
+        if idx in self.cache:
+            return self.cache[idx]
+
+        item = self.dataset[idx]
+        return item
 
 
 class LRUCachedDataset(Dataset):
@@ -135,13 +166,14 @@ class LRUCachedDataset(Dataset):
 
 
 class DiskCachedDataset(Dataset):
-    def __init__(self, dataset, cache_dir, max_cache_items=100):
+    """
+    This dataset will load preprocessed items from disk.
+    Assumes that the dataset has been preprocessed and saved to disk
+    at 'cache_dir'.
+    """
+    def __init__(self, dataset, cache_dir):
         self.dataset = dataset
         self.cache_dir = Path(cache_dir)
-        self.cache_dir.mkdir(exist_ok=True)
-        self.max_cache_items = max_cache_items
-        self.cached_items = 0
-        self._cache_lock = threading.Lock()
 
     def __len__(self):
         return len(self.dataset)
@@ -154,23 +186,4 @@ class DiskCachedDataset(Dataset):
             return item['pixel_values'], item['labels']
 
         pixel_values, labels = self.dataset[idx]
-        self._cache_item(idx, pixel_values, labels)
         return pixel_values, labels
-
-    def _cache_item(self, idx, pixel_values, labels):
-        with self._cache_lock:
-            cache_file = self.cache_dir / f"{idx}.pt"
-
-            if not cache_file.exists():
-                data_to_cache = {
-                    'pixel_values': pixel_values,
-                    'labels': labels
-                }
-                torch.save(data_to_cache, cache_file)
-                self.cached_items += 1
-            
-            if self.cached_items > self.max_cache_items:
-                # Remove first item
-                first_cache_file = os.listdir(self.cache_dir)[0]
-                os.remove(self.cache_dir / first_cache_file)
-                self.cached_items -= 1

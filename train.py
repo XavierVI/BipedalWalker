@@ -70,16 +70,15 @@ def main():
     # Create datasets and dataloaders
     train_dataset, val_dataset = create_datasets(processor)
 
-    lru_cache_dataset = DiskCachedDataset(
+    cache_dataset = DiskCachedDataset(
         train_dataset,
         cache_dir=os.path.join(
             os.pardir, "datasets", "cocodoom", "preprocessed"
-        ),
-        max_cache_items=5000
+        )
     )
 
     train_dataloader = DataLoader(
-        lru_cache_dataset,
+        cache_dataset,
         batch_size=batch_size,
         shuffle=True,
         num_workers=workers,
