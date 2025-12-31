@@ -15,6 +15,7 @@ class CocoDoomDataset(torchvision.datasets.CocoDetection):
         """
         Args:
             data_dir: Path to dataset
+            annotation_file_name: Name of the COCO annotation file
             processor: DETR image processor
         """
         # load COCO annotation
@@ -26,6 +27,11 @@ class CocoDoomDataset(torchvision.datasets.CocoDetection):
         self.coco = COCO(annotation_file)
         self.processor = processor
         self.id2label = self.coco.loadCats(self.coco.getCatIds())
+        # Map COCO category ids (which may be non-contiguous) to contiguous 0-based ids
+        # expected by DETR's classification head.
+        self.cat_id_to_contiguous_id = {
+            cat_id: idx for idx, cat_id in enumerate(self.coco.getCatIds())
+        }
         self.ids = list(sorted(self.coco.imgs.keys()))
 
         print(f"Loaded {annotation_file_name}")
@@ -63,7 +69,14 @@ class CocoDoomDataset(torchvision.datasets.CocoDetection):
         """
         img, target = super(CocoDoomDataset, self).__getitem__(idx)
         img_id = self.ids[idx]
-        target = {'image_id': img_id, 'annotations': target}
+        # Remap category ids to contiguous range [0, num_classes-1]
+        remapped_annotations = []
+        for ann in target:
+            ann_copy = ann.copy()
+            ann_copy['category_id'] = self.cat_id_to_contiguous_id[ann['category_id']]
+            remapped_annotations.append(ann_copy)
+
+        target = {'image_id': img_id, 'annotations': remapped_annotations}
 
         # preprocess data
         encoding = self.processor(

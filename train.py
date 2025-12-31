@@ -6,23 +6,24 @@ CocoDoom: https://www.robots.ox.ac.uk/~vgg/research/researchdoom/cocodoom/
 import os
 import torch
 from torch.utils.data import DataLoader
-from transformers import AutoImageProcessor, AutoModelForObjectDetection, AdamW
+from torch.optim import AdamW
+from transformers import AutoImageProcessor, AutoModelForObjectDetection
 from Vision.datasets import CocoDoomDataset
 from Vision.Trainer import Trainer
 import pycocotools
 from pycocotools.coco import COCO
 
 
-def collate_fn(batch):
-    """Custom collate function to handle variable number of objects per image."""
-    pixel_values = [item[0] for item in batch]
-    labels = [item[1] for item in batch]
-    return torch.stack(pixel_values), labels
+def detr_collate_fn(batch):
+    pixel_values = torch.stack([b[0] for b in batch], dim=0)
+    labels = [b[1] for b in batch]
+    return pixel_values, labels
 
-def create_dataloaders(processor):
+def create_datasets(processor):
     # Load COCO annotations
     coco_doom_dataset_path = os.path.join(
-        os.pardir, os.pardir, "datasets", "cocodoom")
+        os.pardir, "datasets", "cocodoom"
+    )
     
     # we're using the run split,
     # so run1 = train, run2 = val, and run3 = test
@@ -49,19 +50,12 @@ def create_dataloaders(processor):
     return train_dataset, val_dataset, test_dataset
 
 
-def create_dataloader(dataset, batch_size, shuffle=True):
-    return DataLoader(
-        dataset,
-        batch_size=batch_size,
-        shuffle=shuffle
-    )
-
-
 def main():
     optimizer_lr = 1e-5
     weight_decay = 1e-4
     batch_size = 4
     num_epochs = 10
+    workers = 4
     
     # Training setup
     device = torch.device(
@@ -74,16 +68,29 @@ def main():
         "facebook/detr-resnet-50")
 
     # Create datasets and dataloaders
-    train_dataset, val_dataset, test_dataset = create_dataloaders(processor)
+    train_dataset, val_dataset, test_dataset = create_datasets(processor)
 
-    train_dataloader = create_dataloader(
-        train_dataset, batch_size=batch_size, shuffle=True)
-    val_dataloader = create_dataloader(
-        val_dataset, batch_size=batch_size, shuffle=True)
+    train_dataloader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=workers,
+        pin_memory=True,
+        collate_fn=detr_collate_fn
+    )
+    val_dataloader = DataLoader(
+        val_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=workers,
+        pin_memory=True,
+        collate_fn=detr_collate_fn
+    )
 
     # Load the model
     model = AutoModelForObjectDetection.from_pretrained(
         "facebook/detr-resnet-50",
+        ignore_mismatched_sizes=True,
         num_labels=len(train_dataset.coco.getCatIds()),
         id2label={i: cat['name'] for i, cat in enumerate(train_dataset.id2label)},
         label2id={cat['name']: i for i, cat in enumerate(train_dataset.id2label)}
