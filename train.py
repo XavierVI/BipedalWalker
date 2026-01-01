@@ -8,16 +8,19 @@ import torch
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
 from transformers import AutoImageProcessor, AutoModelForObjectDetection
+from transformers import RTDetrForObjectDetection, RTDetrImageProcessor
 from Vision.datasets import *
 from Vision.Trainer import Trainer
-import pycocotools
 from pycocotools.coco import COCO
+from transformers import DetrImageProcessorFast
+from ultralytics import YOLO
 
 
 def detr_collate_fn(batch):
     pixel_values = torch.stack([b[0] for b in batch], dim=0)
     labels = [b[1] for b in batch]
     return pixel_values, labels
+
 
 def create_datasets(processor):
     # Load COCO annotations
@@ -50,35 +53,30 @@ def create_datasets(processor):
     return train_dataset, val_dataset
 
 
-def main():
+def train_detr_model(device):
     optimizer_lr = 1e-5
     weight_decay = 1e-4
-    batch_size = 8
+    batch_size = 16
     num_epochs = 10
-    workers = 16
-    
-    # Training setup
-    device = torch.device(
-        "cuda" if torch.cuda.is_available() else "cpu")
-    
-    print(f"Using device: {device}")
-
+    workers = 8
     # Load processor
-    processor = AutoImageProcessor.from_pretrained(
-        "facebook/detr-resnet-50")
+    processor = RTDetrImageProcessor.from_pretrained(
+        "PekingU/rtdetr_r18vd",
+        use_fast=True    
+    )
 
     # Create datasets and dataloaders
     train_dataset, val_dataset = create_datasets(processor)
 
-    cache_dataset = DiskCachedDataset(
-        train_dataset,
-        cache_dir=os.path.join(
-            os.pardir, "datasets", "cocodoom", "preprocessed"
-        )
-    )
+    # cache_dataset = DiskCachedDataset(
+    #     train_dataset,
+    #     cache_dir=os.path.join(
+    #         os.pardir, "datasets", "cocodoom", "preprocessed"
+    #     )
+    # )
 
     train_dataloader = DataLoader(
-        cache_dataset,
+        train_dataset,
         batch_size=batch_size,
         shuffle=True,
         num_workers=workers,
@@ -97,12 +95,14 @@ def main():
     )
 
     # Load the model
-    model = AutoModelForObjectDetection.from_pretrained(
-        "facebook/detr-resnet-50",
+    model = RTDetrForObjectDetection.from_pretrained(
+        "PekingU/rtdetr_r18vd",
         ignore_mismatched_sizes=True,
         num_labels=len(train_dataset.coco.getCatIds()),
-        id2label={i: cat['name'] for i, cat in enumerate(train_dataset.id2label)},
-        label2id={cat['name']: i for i, cat in enumerate(train_dataset.id2label)}
+        id2label={i: cat['name']
+                  for i, cat in enumerate(train_dataset.id2label)},
+        label2id={cat['name']: i for i,
+                  cat in enumerate(train_dataset.id2label)}
     ).to(device)
 
     # Create optimizer
@@ -123,6 +123,37 @@ def main():
     )
 
     print("\nTraining complete!")
+
+
+
+def train_yolo_model(device):
+    # load a pretrained model
+    model = YOLO("yolo11n.pt")
+    yaml_path = os.path.join(
+        os.pardir, "datasets", "cocodoom",
+        "yolo", "data.yaml")
+
+    results = model.train(
+        data=yaml_path,
+        epochs=50,
+        imgsz=384,
+        batch=16,
+        device=device
+    )
+    # print(results)
+    print("\nYOLO Training complete!")
+
+
+def main():
+    # Training setup
+    device = torch.device(
+        "cuda" if torch.cuda.is_available() else "cpu")
+    
+    print(f"Using device: {device}")
+    train_detr_model(device)
+    # train_yolo_model(device)
+
+    
 
 if __name__ == "__main__":
     main()

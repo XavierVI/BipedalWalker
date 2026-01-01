@@ -37,6 +37,11 @@ class CocoDoomDataset(torchvision.datasets.CocoDetection):
             cat_id: idx for idx, cat_id in enumerate(self.coco.getCatIds())
         }
         self.ids = list(sorted(self.coco.imgs.keys()))
+        
+        # Remap all annotations once during initialization to avoid doing it every __getitem__
+        for ann_id, ann in self.coco.anns.items():
+            ann['category_id'] = self.cat_id_to_contiguous_id[ann['category_id']]
+            
 
         print(f"Loaded {annotation_file_name}")
         print(f"Number of images: {len(self.coco.imgs)}")
@@ -72,14 +77,8 @@ class CocoDoomDataset(torchvision.datasets.CocoDetection):
         """
         img, target = super(CocoDoomDataset, self).__getitem__(idx)
         img_id = self.ids[idx]
-        # Remap category ids to contiguous range [0, num_classes-1]
-        remapped_annotations = []
-        for ann in target:
-            ann_copy = ann.copy()
-            ann_copy['category_id'] = self.cat_id_to_contiguous_id[ann['category_id']]
-            remapped_annotations.append(ann_copy)
 
-        target = {'image_id': img_id, 'annotations': remapped_annotations}
+        target = {'image_id': img_id, 'annotations': target}
 
         # preprocess data
         encoding = self.processor(
