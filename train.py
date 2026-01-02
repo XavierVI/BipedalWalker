@@ -55,8 +55,9 @@ def create_datasets(processor):
 
 
 def train_detr_model(device):
-    optimizer_lr = 1e-3
-    weight_decay = 1e-4
+    backbone_lr = 1e-5
+    classifier_lr = 1e-4
+    bbox_predictor_lr = 1e-4
     batch_size = 16
     num_epochs = 10
     workers = 16
@@ -107,10 +108,14 @@ def train_detr_model(device):
 
     # Create optimizer
     optimizer = AdamW(
-        model.parameters(),
-        lr=optimizer_lr,
-        weight_decay=weight_decay
+        [
+            {'params': model.model.parameters(), 'lr': backbone_lr},  # backbone
+            {'params': model.class_labels_classifier.parameters(), 'lr': classifier_lr},
+            {'params': model.bbox_predictor.parameters(), 'lr': bbox_predictor_lr}
+        ]
     )
+    # Add gradient clipping
+    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.1)
     # Create Trainer
     trainer = Trainer()
     trainer.train(
@@ -121,6 +126,15 @@ def train_detr_model(device):
         device,
         num_epochs=num_epochs
     )
+
+    # print out training and validation losses
+    print("\nTraining Losses per Epoch:")
+    for epoch, loss in enumerate(trainer.train_losses):
+        print(f"Epoch {epoch + 1}: {loss:.4f}")
+
+    print("\nValidation Losses per Epoch:")
+    for epoch, loss in enumerate(trainer.val_losses):
+        print(f"Epoch {epoch + 1}: {loss:.4f}")
 
     print("\nTraining complete!")
 

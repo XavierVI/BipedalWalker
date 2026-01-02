@@ -67,12 +67,14 @@ class CocoDoomDataset(torchvision.datasets.CocoDetection):
         img, target = super(CocoDoomDataset, self).__getitem__(idx)
         img_id = self.img_ids[idx]
 
-        # remap category IDs from image to consistent format
-        for ann in target:
-            original_id = ann['category_id']
-            ann['category_id'] = self.coco_id_to_contiguous[original_id]
-
         target = {'image_id': img_id, 'annotations': target}
+
+        for ann in target['annotations']:
+            # if it's not in the map, then skip it
+            if not ann['category_id'] in self.coco_id_to_contiguous:
+                continue
+            
+            ann['category_id'] = self.coco_id_to_contiguous[ann['category_id']]
 
         # preprocess data
         encoding = self.processor(
